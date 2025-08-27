@@ -130,6 +130,7 @@ export enum EBMLId {
 	Attachments = 0x1941a469,
 	Chapters = 0x1043a770,
 	Tags = 0x1254c367,
+	AlphaMode = 0x53c0,
 }
 
 export const LEVEL_0_EBML_IDS: EBMLId[] = [

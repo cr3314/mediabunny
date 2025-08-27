@@ -124,6 +124,7 @@ type ClusterBlock = {
 	referencedTimestamps: number[];
 	data: Uint8Array;
 	lacing: BlockLacing;
+	alphaData?: Uint8Array;
 };
 
 type CuePoint = {
@@ -157,6 +158,7 @@ type InternalTrack = {
 			codec: VideoCodec | null;
 			codecDescription: Uint8Array | null;
 			colorSpace: VideoColorSpaceInit | null;
+			alphaMode: boolean | null;
 		}
 		| {
 			type: 'audio';
@@ -957,6 +959,7 @@ export class MatroskaDemuxer extends Demuxer {
 						codec: null,
 						codecDescription: null,
 						colorSpace: null,
+						alphaMode: null,
 					};
 				} else if (type === 2) {
 					this.currentTrack.info = {
@@ -1262,6 +1265,33 @@ export class MatroskaDemuxer extends Demuxer {
 				// We'll offset this by the block's timestamp later
 				this.currentBlock.referencedTimestamps.push(relativeTimestamp);
 			}; break;
+
+			case EBMLId.AlphaMode: {
+				if (this.currentTrack?.info?.type !== 'video') break;
+
+				this.currentTrack.info.alphaMode = !!reader.readUnsignedInt(size);
+			}; break;
+
+			case EBMLId.BlockAdditions: {
+				this.readContiguousElements(reader, size);
+			}; break;
+
+			case EBMLId.BlockMore: {
+				this.readContiguousElements(reader, size);
+			}; break;
+
+			case EBMLId.BlockAddID: {
+				const id = reader.readUnsignedInt(size);
+
+				// Only handle BlockAdditional defined by the corresponding Codec Mapping for now, i.e. alpha data
+				if (id !== 1) break;
+			}; break;
+
+			case EBMLId.BlockAdditional: {
+				if (!this.currentBlock || this.currentBlock.alphaData) break;
+
+				this.currentBlock.alphaData = reader.readBytes(size - (reader.pos - dataStartPos));
+			}
 		}
 
 		reader.pos = dataStartPos + size;
@@ -1815,6 +1845,17 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking implements InputVid
 
 	getRotation() {
 		return this.internalTrack.info.rotation;
+	}
+
+	getAlphaMode() {
+		// Somehow, it is possible to have inconsistency between flag and actual data
+		if (this.internalTrack.info.alphaMode) {
+			for (const trackData of this.internalTrack.clusters.at(0)?.trackData.values() || []) {
+				return Boolean(trackData.blocks.at(0)?.alphaData);
+			}
+		}
+
+		return false;
 	}
 
 	async getColorSpace(): Promise<VideoColorSpaceInit> {
