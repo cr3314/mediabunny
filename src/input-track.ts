@@ -185,6 +185,7 @@ export interface InputVideoTrackBacking extends InputTrackBacking {
 	getRotation(): Rotation;
 	getColorSpace(): Promise<VideoColorSpaceInit>;
 	getDecoderConfig(): Promise<VideoDecoderConfig | null>;
+	hardwareAcceleration: VideoDecoderConfig['hardwareAcceleration'];
 }
 
 /**

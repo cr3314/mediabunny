@@ -2511,6 +2511,7 @@ abstract class IsobmffTrackBacking implements InputTrackBacking {
 class IsobmffVideoTrackBacking extends IsobmffTrackBacking implements InputVideoTrackBacking {
 	override internalTrack: InternalVideoTrack;
 	decoderConfigPromise: Promise<VideoDecoderConfig> | null = null;
+	_hardwareAcceleration: VideoDecoderConfig['hardwareAcceleration'];
 
 	constructor(internalTrack: InternalVideoTrack) {
 		super(internalTrack);
@@ -2562,8 +2563,20 @@ class IsobmffVideoTrackBacking extends IsobmffTrackBacking implements InputVideo
 				codedHeight: this.internalTrack.info.height,
 				description: this.internalTrack.info.codecDescription ?? undefined,
 				colorSpace: this.internalTrack.info.colorSpace ?? undefined,
+				hardwareAcceleration: this.hardwareAcceleration,
 			};
 		})();
+	}
+
+	get hardwareAcceleration() {
+		return this._hardwareAcceleration;
+	}
+
+	set hardwareAcceleration(hardwareAcceleration: VideoDecoderConfig['hardwareAcceleration']) {
+		if (hardwareAcceleration !== this._hardwareAcceleration) {
+			this._hardwareAcceleration = hardwareAcceleration;
+			this.decoderConfigPromise = null;
+		}
 	}
 }
 
