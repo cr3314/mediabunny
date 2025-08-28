@@ -651,6 +651,55 @@ const isVideoFrame = (x: unknown): x is VideoFrame => {
 	return typeof VideoFrame !== 'undefined' && x instanceof VideoFrame;
 };
 
+export const composeAlpha = async (sample: VideoSample, alphaSample?: VideoSample | null | void) => {
+	if (!alphaSample) return sample;
+
+	// Need the width/height before rotation, cannot use sample.displayWidth
+	const data = sample._data;
+	const alphaData = alphaSample._data;
+
+	if (!isVideoFrame(data) || !isVideoFrame(alphaData)) {
+		throw new Error('composeAlpha only support VideoFrame');
+	}
+
+	// copyTo does not support explict conversions to YUV formats
+	// Only alpha format supported for constructing new VideoFrame is I420A
+	// Thus, no support formats like I444A, which is possible with AV1 encoding
+	if (data.format !== 'I420') {
+		throw new Error('composeAlpha only support I420 format');
+	}
+
+	const allocationSize = data.allocationSize();
+	const dimension = data.displayWidth * data.displayHeight;
+	const uint8 = new Uint8Array(allocationSize + dimension);
+	const alphaUint8 = new Uint8Array(alphaData.allocationSize());
+
+	// YUV + Y (alpha) -> I420A
+	await Promise.all([
+		data.copyTo(uint8),
+		alphaData.copyTo(alphaUint8),
+	]);
+	uint8.set(alphaUint8.subarray(0, dimension), allocationSize);
+
+	const videoSampleWithAlpha = new VideoFrame(uint8, {
+		codedWidth: data.displayWidth,
+		codedHeight: data.displayHeight,
+		timestamp: data.timestamp,
+		duration: data.duration,
+		format: 'I420A',
+		colorSpace: data.colorSpace,
+		transfer: [uint8.buffer],
+	} as VideoFrameBufferInit);
+
+	sample.close();
+	alphaSample.close();
+
+	return new VideoSample(videoSampleWithAlpha, {
+		rotation: sample.rotation,
+		colorSpace: videoSampleWithAlpha.colorSpace,
+	});
+};
+
 const AUDIO_SAMPLE_FORMATS = new Set(
 	['f32', 'f32-planar', 's16', 's16-planar', 's32', 's32-planar', 'u8', 'u8-planar'],
 );

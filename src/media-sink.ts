@@ -28,7 +28,7 @@ import {
 } from './misc';
 import { EncodedPacket } from './packet';
 import { fromAlaw, fromUlaw } from './pcm';
-import { AudioSample, VideoSample } from './sample';
+import { AudioSample, VideoSample, composeAlpha } from './sample';
 
 /**
  * Additional options for controlling packet retrieval.
@@ -989,6 +989,9 @@ export type WrappedCanvas = {
 	duration: number;
 };
 
+/** @internal */
+type VideoSampleGenerator = ReturnType<VideoSampleSink['samples']> | ReturnType<VideoSampleSink['samplesAtTimestamps']>;
+
 /**
  * Options for constructing a CanvasSink.
  * @public
@@ -1048,6 +1051,8 @@ export class CanvasSink {
 	_rotation: Rotation;
 	/** @internal */
 	_videoSampleSink: VideoSampleSink;
+	/** @internal */
+	_alphaVideoSampleSink?: VideoSampleSink;
 	/** @internal */
 	_canvasPool: (HTMLCanvasElement | OffscreenCanvas | null)[];
 	/** @internal */
@@ -1111,8 +1116,27 @@ export class CanvasSink {
 		this._height = height;
 		this._rotation = rotation;
 		this._fit = options.fit ?? 'fill';
-		this._videoSampleSink = new VideoSampleSink(videoTrack);
 		this._canvasPool = Array.from({ length: options.poolSize ?? 0 }, () => null);
+
+
+		let backingForAlphaData;
+		
+		try {
+			if ('getBackingForAlphaData' in videoTrack._backing && typeof videoTrack._backing.getBackingForAlphaData === 'function') {
+				backingForAlphaData = videoTrack._backing.getBackingForAlphaData() as InputVideoTrack['_backing'];
+			}
+		} catch {
+			// No handling, expected failure if no alpha data
+		}
+
+		// For copyTo: avoid GPU readback in order to compose alpha efficiently
+		if (backingForAlphaData) {
+			backingForAlphaData.hardwareAcceleration = 'prefer-software';
+			this._alphaVideoSampleSink = new VideoSampleSink(new InputVideoTrack(backingForAlphaData));
+			this._videoTrack._backing.hardwareAcceleration = 'prefer-software';
+		}
+
+		this._videoSampleSink = new VideoSampleSink(videoTrack);
 	}
 
 	/** @internal */
@@ -1141,13 +1165,14 @@ export class CanvasSink {
 			this._nextCanvasIndex = (this._nextCanvasIndex + 1) % this._canvasPool.length;
 		}
 
-		const context
-			= canvas.getContext('2d', { alpha: false }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+		const alpha = Boolean(sample.format === 'I420A');
+		const context = canvas
+			.getContext('2d', { alpha }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 		assert(context);
 
 		context.resetTransform();
 
-		if (!canvasIsNew) {
+		if (!canvasIsNew || alpha) {
 			context.clearRect(0, 0, this._width, this._height);
 		}
 
@@ -1177,7 +1202,45 @@ export class CanvasSink {
 		validateTimestamp(timestamp);
 
 		const sample = await this._videoSampleSink.getSample(timestamp);
-		return sample && this._videoSampleToWrappedCanvas(sample);
+		const alphaSample = await this._alphaVideoSampleSink?.getSample(timestamp);
+
+		return sample && this._videoSampleToWrappedCanvas(await composeAlpha(sample, alphaSample));
+	}
+
+	/** @internal */
+	async* _composeWrappedCanvasFromGenerators(
+		sampleGenerator: VideoSampleGenerator,
+		alphaSampleGenerator?: VideoSampleGenerator,
+	) {
+		let sample;
+		let alphaSample;
+
+		try {
+			do {
+				([sample, alphaSample] = await Promise.all([
+					sampleGenerator.next(),
+					alphaSampleGenerator?.next(),
+				]));
+
+				if (!sample.value) {
+					break;
+				}
+
+				yield this._videoSampleToWrappedCanvas(await composeAlpha(sample.value, alphaSample?.value));
+			} while (!sample.done);
+		} catch (error) {
+			await Promise.all([
+				sampleGenerator.throw(error),
+				alphaSampleGenerator?.throw(error),
+			]);
+		} finally {
+			sample?.value?.close();
+			alphaSample?.value?.close();
+			await Promise.all([
+				sampleGenerator.return(),
+				alphaSampleGenerator?.return(),
+			]);
+		}
 	}
 
 	/**
@@ -1188,9 +1251,9 @@ export class CanvasSink {
 	 * @param endTimestamp - The timestamp in seconds at which to stop yielding canvases (exclusive).
 	 */
 	canvases(startTimestamp = 0, endTimestamp = Infinity) {
-		return mapAsyncGenerator(
+		return this._composeWrappedCanvasFromGenerators(
 			this._videoSampleSink.samples(startTimestamp, endTimestamp),
-			sample => this._videoSampleToWrappedCanvas(sample),
+			this._alphaVideoSampleSink?.samples(startTimestamp, endTimestamp),
 		);
 	}
 
@@ -1203,9 +1266,9 @@ export class CanvasSink {
 	 * @param timestamps - An iterable or async iterable of timestamps in seconds.
 	 */
 	canvasesAtTimestamps(timestamps: AnyIterable<number>) {
-		return mapAsyncGenerator(
+		return this._composeWrappedCanvasFromGenerators(
 			this._videoSampleSink.samplesAtTimestamps(timestamps),
-			sample => sample && this._videoSampleToWrappedCanvas(sample),
+			this._alphaVideoSampleSink?.samplesAtTimestamps(timestamps),
 		);
 	}
 }
