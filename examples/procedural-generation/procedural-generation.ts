@@ -2,6 +2,7 @@ import {
 	Output,
 	BufferTarget,
 	Mp4OutputFormat,
+	WebMOutputFormat,
 	CanvasSource,
 	AudioBufferSource,
 	QUALITY_HIGH,
@@ -14,6 +15,7 @@ const durationSlider = document.querySelector('#duration-slider') as HTMLInputEl
 const durationValue = document.querySelector('#duration-value') as HTMLParagraphElement;
 const ballsSlider = document.querySelector('#balls-slider') as HTMLInputElement;
 const ballsValue = document.querySelector('#balls-value') as HTMLParagraphElement;
+const fileFormat = document.querySelector('#file-format') as HTMLSelectElement;
 const renderButton = document.querySelector('#render-button') as HTMLButtonElement;
 const horizontalRule = document.querySelector('hr') as HTMLHRElement;
 const progressBarContainer = document.querySelector('#progress-bar-container') as HTMLDivElement;
@@ -80,14 +82,16 @@ const generateVideo = async () => {
 
 		const duration = Number(durationSlider.value);
 		const totalFrames = duration * frameRate;
+		const isWebm = fileFormat.value === 'WebM';
+		const format = isWebm ? new WebMOutputFormat() : new Mp4OutputFormat();
 
 		// Let's init the scene
 		initScene(duration);
 
 		// Create a new output file
 		output = new Output({
+			format,
 			target: new BufferTarget(), // Stored in memory
-			format: new Mp4OutputFormat(),
 		});
 
 		// Retrieve the first video codec supported by this browser that can be contained in the output format
@@ -103,6 +107,7 @@ const generateVideo = async () => {
 		const canvasSource = new CanvasSource(renderCanvas, {
 			codec: videoCodec,
 			bitrate: QUALITY_HIGH,
+			separateAlpha: isWebm,
 		});
 		output.addVideoTrack(canvasSource, { frameRate });
 

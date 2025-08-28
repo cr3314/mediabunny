@@ -28,6 +28,15 @@
 				<p class="text-xs text-zinc-600 dark:text-zinc-400" id="balls-value"></p>
 			</div>
 
+			<div class="flex flex-col gap-2">
+				<label for="file-format" class="text-sm font-medium">File format</label>
+				<select name="file-format" id="file-format" class="h-6 text-xs text-zinc-600 dark:text-zinc-400 appearance-none cursor-pointer">
+					<option value="MP4">MP4 (Opaque)</option>
+					<option value="WebM">WebM (Transparent)</option>
+				</select>
+				<p class="text-xs text-zinc-600 dark:text-zinc-400" id="file-format-value"></p>
+			</div>
+
 			<button id="render-button" class="rounded-lg bg-zinc-200 dark:bg-zinc-750 hover:bg-zinc-300 dark:hover:bg-zinc-700 px-5 py-2">
 				Generate video
 			</button>
@@ -42,7 +51,7 @@
 		</div>
 		<p class="text-xs font-medium mt-1.5 tabular-nums" id="progress-text" style="display: none;"></p>
 
-		<video controls class="rounded-md" id="result-video" style="display: none;"></video>
+		<video controls class="rounded-md checkerboard" id="result-video" style="display: none;"></video>
 		<p class="text-xs font-medium mt-1" id="video-info" style="display: none;"></p>
 
 		<a href="/" class="fixed top-0 left-0 flex gap-2 py-2 px-5 items-center">

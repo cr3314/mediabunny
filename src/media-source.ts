@@ -199,6 +199,8 @@ class VideoEncoderWrapper {
 	private customEncoderCallSerializer = new CallSerializer();
 	private customEncoderQueueSize = 0;
 
+	public isAlphaEncoder: boolean | null = null;
+
 	/**
 	 * Encoders typically throw their errors "out of band", meaning asynchronously in some other execution context.
 	 * However, we want to surface these errors to the user within the normal control flow, so they don't go uncaught.
@@ -402,6 +404,12 @@ class VideoEncoderWrapper {
 					output: (chunk, meta) => {
 						const packet = EncodedPacket.fromEncodedChunk(chunk);
 
+						if (typeof this.isAlphaEncoder === 'boolean') {
+							Object.assign(packet, {
+								isAlphaPacket: this.isAlphaEncoder,
+								alphaEnabled: true,
+							});
+						}
 						this.encodingConfig.onEncodedPacket?.(packet, meta);
 						void this.muxer!.addEncodedVideoPacket(this.source._connectedTrack!, packet, meta);
 					},
@@ -491,6 +499,7 @@ export class VideoSampleSource extends VideoSource {
 	}
 }
 
+
 /**
  * This source can be used to add video frames to the output track from a fixed canvas element. Since canvases are often
  * used for rendering, this source provides a convenient wrapper around VideoSampleSource.
@@ -501,8 +510,18 @@ export class CanvasSource extends VideoSource {
 	private _encoder: VideoEncoderWrapper;
 	/** @internal */
 	private _canvas: HTMLCanvasElement | OffscreenCanvas;
+	/** @internal */
+	private _alphaEncoder?: VideoEncoderWrapper;
+	/** @internal */
+	private _tempCanvas?: OffscreenCanvas;
 
-	constructor(canvas: HTMLCanvasElement | OffscreenCanvas, encodingConfig: VideoEncodingConfig) {
+	constructor(
+		canvas: HTMLCanvasElement | OffscreenCanvas,
+		encodingConfig: VideoEncodingConfig & {
+			/** Option to separately encode alpha, only useful for WebMOutputFormat */
+			separateAlpha?: boolean
+		},
+	) {
 		if (
 			!(typeof HTMLCanvasElement !== 'undefined' && canvas instanceof HTMLCanvasElement)
 			&& !(typeof OffscreenCanvas !== 'undefined' && canvas instanceof OffscreenCanvas)
@@ -514,6 +533,29 @@ export class CanvasSource extends VideoSource {
 		super(encodingConfig.codec);
 		this._encoder = new VideoEncoderWrapper(this, encodingConfig);
 		this._canvas = canvas;
+		if (encodingConfig.separateAlpha) {
+			this._alphaEncoder = new VideoEncoderWrapper(this, encodingConfig);
+			this._alphaEncoder.isAlphaEncoder = true;
+			this._encoder.isAlphaEncoder = false;
+		}
+	}
+
+	/** @internal */
+	_extractAlphaAsLuminance(videoSample: VideoSample) {
+		this._tempCanvas ??= new OffscreenCanvas(videoSample.displayWidth, videoSample.displayHeight);
+		this._tempCanvas.width = videoSample.displayWidth;
+		this._tempCanvas.height = videoSample.displayHeight;
+
+		const context = this._tempCanvas.getContext('2d');
+
+		assert(context);
+		context.globalCompositeOperation = 'copy';
+		context.drawImage(videoSample.toCanvasImageSource(), 0, 0);
+		context.globalCompositeOperation = 'source-in';
+		context.fillStyle = 'white';
+		context.fillRect(0, 0, videoSample.displayWidth, videoSample.displayHeight);
+
+		return new VideoSample(this._tempCanvas, { timestamp: videoSample.timestamp, duration: videoSample.duration });
 	}
 
 	/**
@@ -525,7 +567,7 @@ export class CanvasSource extends VideoSource {
 	 * @returns A Promise that resolves once the output is ready to receive more samples. You should await this Promise
 	 * to respect writer and encoder backpressure.
 	 */
-	add(timestamp: number, duration = 0, encodeOptions?: VideoEncoderEncodeOptions) {
+	async add(timestamp: number, duration = 0, encodeOptions?: VideoEncoderEncodeOptions) {
 		if (!Number.isFinite(timestamp) || timestamp < 0) {
 			throw new TypeError('timestamp must be a non-negative number.');
 		}
@@ -534,11 +576,16 @@ export class CanvasSource extends VideoSource {
 		}
 
 		const sample = new VideoSample(this._canvas, { timestamp, duration });
-		return this._encoder.add(sample, true, encodeOptions);
+
+		await Promise.all([
+			this._alphaEncoder && this._alphaEncoder.add(this._extractAlphaAsLuminance(sample), true, encodeOptions),
+			this._encoder.add(sample, true, encodeOptions),
+		]);
 	}
 
 	/** @internal */
 	override _flushAndClose(forceClose: boolean) {
+		delete this._tempCanvas;
 		return this._encoder.flushAndClose(forceClose);
 	}
 }
