@@ -32,7 +32,9 @@
 		<p id="warning-element" class="text-amber-500 mb-1"></p>
 
 		<div id="player" class="relative bg-black rounded-xl shrink min-h-14 min-w-0 w-full max-w-5xl overflow-hidden select-none" style="display: none;">
-			<canvas class="size-full object-contain" width="1280" height="720"></canvas>
+			<div class="size-full">
+				<canvas class="max-w-full max-h-full m-auto object-contain checkerboard" width="1280" height="720"></canvas>
+			</div>
 
 			<div class="bg-zinc-900/50 absolute left-0 right-0 bottom-0 h-10 items-center flex m-2 rounded-lg text-white transition-opacity" id="controls" style="opacity: 0;">
 				<button class="p-2 group outline-none" id="play-button">

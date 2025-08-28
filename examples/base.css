@@ -11,3 +11,7 @@
 	--color-zinc-750: oklch(32.2% 0.0095 285.919);
 	--font-sans: 'Rubik Variable', sans-serif;
 }
+
+.checkerboard {
+	background: repeating-conic-gradient(#ccc 0 25%, transparent 0 50%) 50% / 50px 50px;
+}
