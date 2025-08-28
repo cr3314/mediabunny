@@ -1305,6 +1305,8 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 		blockIndex: number;
 	}>();
 
+	retrieveAlphaData: boolean | null = null;
+
 	constructor(public internalTrack: InternalTrack) {}
 
 	getId() {
@@ -1534,7 +1536,7 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 		);
 	}
 
-	private async fetchPacketInCluster(cluster: Cluster, blockIndex: number, options: PacketRetrievalOptions) {
+	private fetchPacketInCluster(cluster: Cluster, blockIndex: number, options: PacketRetrievalOptions) {
 		if (blockIndex === -1) {
 			return null;
 		}
@@ -1543,11 +1545,11 @@ abstract class MatroskaTrackBacking implements InputTrackBacking {
 		const block = trackData.blocks[blockIndex];
 		assert(block);
 
-		const data = options.metadataOnly ? PLACEHOLDER_DATA : block.data;
+		const data = options.metadataOnly ? PLACEHOLDER_DATA : this.retrieveAlphaData ? block.alphaData : block.data;
 		const timestamp = block.timestamp / this.internalTrack.segment.timestampFactor;
 		const duration = block.duration / this.internalTrack.segment.timestampFactor;
 		const packet = new EncodedPacket(
-			data,
+			data!,
 			block.isKeyFrame ? 'key' : 'delta',
 			timestamp,
 			duration,
@@ -1924,6 +1926,32 @@ class MatroskaVideoTrackBacking extends MatroskaTrackBacking implements InputVid
 			this._hardwareAcceleration = hardwareAcceleration;
 			this.decoderConfigPromise = null;
 		}
+	}
+
+	/**
+	 * Get a copy of the backing to instead retrieve alpha
+	 */
+	getBackingForAlphaData() {
+		if (this instanceof MatroskaVideoTrackAlphaBacking) {
+			throw new Error('backing is already MatroskaVideoTrackAlphaBacking')
+		}
+
+		if (!(this instanceof MatroskaVideoTrackBacking)) {
+			throw new Error('backing must be a MatroskaVideoTrackBacking');
+		}
+
+		if (!this.getAlphaMode()) {
+			throw new Error('backing must have alpha mode enabled');
+		}
+
+		return new MatroskaVideoTrackAlphaBacking(this);
+	}
+}
+
+class MatroskaVideoTrackAlphaBacking extends MatroskaVideoTrackBacking implements InputVideoTrackBacking {
+	constructor(originalBacking: MatroskaVideoTrackBacking) {
+		super(originalBacking.internalTrack);
+		this.retrieveAlphaData = true;
 	}
 }
 
